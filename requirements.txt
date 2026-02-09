@@ -1,0 +1,7 @@
+flask
+flask-socketio
+pymongo[srv]
+python-dotenv
+eventlet
+flask-cors
+certifi

@@ -1,0 +1,8 @@
+.env
+__pycache__
+*.pyc
+.gitignore
+.git
+.vscode
+.agent
+node_modules

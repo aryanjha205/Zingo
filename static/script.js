@@ -71,7 +71,7 @@ if (canvas) {
             if (p.x < 0 || p.x > canvas.width) p.speedX *= -1;
             if (p.y < 0 || p.y > canvas.height) p.speedY *= -1;
 
-            ctx.fillStyle = `rgba(92, 98, 255, ${p.opacity})`;
+            ctx.fillStyle = `rgba(74, 222, 128, ${p.opacity})`;
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.fill();
@@ -89,6 +89,17 @@ if (canvas) {
 socket.on('update_count', (data) => {
     if (onlineCountElem) onlineCountElem.innerText = data.count;
 });
+
+// Periodic polling for Vercel/Serverless accuracy
+setInterval(async () => {
+    try {
+        const res = await fetch('/api/stats');
+        const data = await res.json();
+        if (onlineCountElem) onlineCountElem.innerText = data.online_users;
+    } catch (e) {
+        console.warn("Stats fetch failed");
+    }
+}, 10000); // Every 10 seconds
 
 socket.on('identity_assigned', (data) => {
     const localIdElem = document.getElementById('local-identity');

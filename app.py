@@ -55,7 +55,6 @@ threading.Thread(target=connect_to_mongodb, daemon=True).start()
 waiting_users = []  # List of sid
 active_rooms = {}   # sid -> room_id
 room_members = {}   # room_id -> [sid1, sid2]
-online_count = 0
 
 @app.route('/')
 def index():
@@ -63,29 +62,39 @@ def index():
 
 @app.route('/api/stats')
 def get_stats():
-    return jsonify({"online_users": online_count})
+    count = 0
+    if sessions_col:
+        count = sessions_col.count_documents({})
+    return jsonify({"online_users": count})
 
 import random
 
 ADJECTIVES = ["Neon", "Silver", "Cyber", "Global", "Arctic", "Solar", "Vortex", "Elite"]
 NOUNS = ["Falcon", "Tiger", "Ghost", "Runner", "Sage", "Knight", "Oracle", "Spark"]
 
+def get_online_count():
+    if sessions_col:
+        return sessions_col.count_documents({})
+    return 0
+
 @socketio.on('connect')
 def handle_connect(auth=None):
-    global online_count
-    online_count += 1
     identity = f"{random.choice(ADJECTIVES)} {random.choice(NOUNS)} {random.randint(10, 99)}"
     if sessions_col:
         sessions_col.update_one({'sid': request.sid}, {'$set': {'identity': identity, 'joined_at': datetime.now(timezone.utc)}}, upsert=True)
+    
+    current_count = get_online_count()
     emit('identity_assigned', {'identity': identity})
-    emit('update_count', {'count': online_count}, broadcast=True)
-    print(f"User connected: {request.sid} as {identity}. Total: {online_count}")
+    emit('update_count', {'count': current_count}, broadcast=True)
+    print(f"User connected: {request.sid} as {identity}. Total: {current_count}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    global online_count
-    online_count -= 1
     sid = request.sid
+    
+    # Remove from MongoDB sessions first
+    if sessions_col:
+        sessions_col.delete_one({'sid': sid})
     
     # Remove from waiting queue if present
     if sid in waiting_users:
@@ -108,12 +117,9 @@ def handle_disconnect():
             for m_sid in members:
                 active_rooms.pop(m_sid, None)
                 
-    # Remove from MongoDB sessions if exists
-    if sessions_col:
-        sessions_col.delete_one({'sid': sid})
-        
-    emit('update_count', {'count': online_count}, broadcast=True)
-    print(f"User disconnected: {sid}. Total: {online_count}")
+    current_count = get_online_count()
+    emit('update_count', {'count': current_count}, broadcast=True)
+    print(f"User disconnected: {sid}. Total: {current_count}")
 
 @socketio.on('find_partner')
 def find_partner():

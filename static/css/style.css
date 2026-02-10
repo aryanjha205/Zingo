@@ -13,44 +13,6 @@
     --radius-md: 12px;
 }
 
-/* Footer Styles */
-.app-footer {
-    padding: 15px 40px;
-    background: rgba(255, 255, 255, 0.9);
-    backdrop-filter: blur(10px);
-    border-top: 1px solid rgba(0, 0, 0, 0.05);
-    z-index: 100;
-}
-
-.footer-content {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    max-width: 1400px;
-    margin: 0 auto;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-}
-
-.footer-info p {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
-}
-
-.footer-info i {
-    color: var(--primary);
-}
-
-@media (max-width: 768px) {
-    .footer-content {
-        flex-direction: column;
-        gap: 10px;
-        text-align: center;
-    }
-}
-
 * {
     margin: 0;
     padding: 0;

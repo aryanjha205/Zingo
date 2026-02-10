@@ -27,7 +27,10 @@ let isFinding = false;
 const servers = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
     ]
 };
 
@@ -63,42 +66,61 @@ async function apiCall(endpoint, data = {}) {
 
 // --- Sync Loop ---
 
+let syncInterval;
+let currentInterval = 1000;
+
+async function syncTick() {
+    // 1. Heartbeat
+    const hb = await apiCall('heartbeat');
+    if (hb && hb.online_count !== undefined) {
+        onlineCountSpan.textContent = hb.online_count;
+    }
+
+    // 2. Sync (Signals & Messages)
+    const data = await apiCall('sync');
+    if (!data) return;
+
+    // Handle match discovery
+    if (data.partner_uid && !partnerUid) {
+        console.log("Sync found partner:", data.partner_uid);
+        handleNewPartner(data.partner_uid, false);
+    } else if (!data.partner_uid && partnerUid) {
+        console.log("Sync found partner left");
+        handlePartnerLeft();
+    }
+
+    // Handle Messages
+    if (data.messages && data.messages.length > 0) {
+        data.messages.forEach(msg => {
+            addChatMessage(msg.message, 'partner');
+        });
+    }
+
+    // Handle Signals
+    if (data.signals && data.signals.length > 0) {
+        data.signals.forEach(async (s) => {
+            await handleSignal(s.signal);
+        });
+    }
+
+    // Dynamic Interval Control
+    let nextInterval = 1000;
+    if (isFinding || (partnerUid && peerConnection && peerConnection.iceConnectionState !== 'connected')) {
+        nextInterval = 500; // Faster when searching or connecting
+    } else if (partnerUid) {
+        nextInterval = 800; // Normal chat speed
+    }
+
+    if (nextInterval !== currentInterval) {
+        currentInterval = nextInterval;
+        clearInterval(syncInterval);
+        syncInterval = setInterval(syncTick, currentInterval);
+    }
+}
+
 async function startSync() {
     console.log("Starting Sync Loop...");
-    setInterval(async () => {
-        // 1. Heartbeat
-        const hb = await apiCall('heartbeat');
-        if (hb && hb.online_count !== undefined) {
-            onlineCountSpan.textContent = hb.online_count;
-        }
-
-        // 2. Sync (Signals & Messages)
-        const data = await apiCall('sync');
-        if (!data) return;
-
-        // Handle match discovery
-        if (data.partner_uid && !partnerUid) {
-            console.log("Sync found partner:", data.partner_uid);
-            handleNewPartner(data.partner_uid, false);
-        } else if (!data.partner_uid && partnerUid) {
-            console.log("Sync found partner left");
-            handlePartnerLeft();
-        }
-
-        // Handle Messages
-        if (data.messages && data.messages.length > 0) {
-            data.messages.forEach(msg => {
-                addChatMessage(msg.message, 'partner');
-            });
-        }
-
-        // Handle Signals
-        if (data.signals && data.signals.length > 0) {
-            data.signals.forEach(async (s) => {
-                await handleSignal(s.signal);
-            });
-        }
-    }, 1500); // 1.5s interval
+    syncInterval = setInterval(syncTick, currentInterval);
 }
 
 // --- WebRTC & Matching Logic ---
@@ -160,6 +182,13 @@ function initPeerConnection() {
 
     peerConnection.oniceconnectionstatechange = () => {
         console.log("ICE State:", peerConnection.iceConnectionState);
+        if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
+            addSystemMessage("Connected! Say hi!");
+            partnerStatus.style.display = "none";
+        } else if (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected') {
+            addSystemMessage("Connection failed. Try clicking 'Next'.");
+            handlePartnerLeft();
+        }
     };
 }
 

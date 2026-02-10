@@ -23,15 +23,14 @@ let peerConnection;
 let partnerUid = null;
 let isInitiator = false;
 let isFinding = false;
+let outgoingSignals = []; // Queue for signals to be sent in batch
 
 const servers = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
-    ]
+        { urls: 'stun:stun1.l.google.com:19302' }
+    ],
+    iceCandidatePoolSize: 10
 };
 
 // --- Initialization ---
@@ -103,12 +102,23 @@ async function syncTick() {
         });
     }
 
+    // 3. Send queued signals in parallel
+    if (outgoingSignals.length > 0 && partnerUid) {
+        const signalsToSend = [...outgoingSignals];
+        outgoingSignals = [];
+        signalsToSend.forEach(signal => {
+            apiCall('send_signal', { partner_uid: partnerUid, signal });
+        });
+    }
+
     // Dynamic Interval Control
     let nextInterval = 1000;
-    if (isFinding || (partnerUid && peerConnection && peerConnection.iceConnectionState !== 'connected')) {
-        nextInterval = 500; // Faster when searching or connecting
+    if (partnerUid && peerConnection && (peerConnection.iceConnectionState !== 'connected' && peerConnection.iceConnectionState !== 'completed')) {
+        nextInterval = 150; // Ultra-aggressive 150ms polling during handshake
+    } else if (isFinding) {
+        nextInterval = 300; // Fast when searching
     } else if (partnerUid) {
-        nextInterval = 800; // Normal chat speed
+        nextInterval = 600; // Normal chat speed
     }
 
     if (nextInterval !== currentInterval) {
@@ -139,7 +149,8 @@ async function handleNewPartner(pUid, initiator) {
         try {
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            await apiCall('send_signal', { partner_uid: partnerUid, signal: offer });
+            outgoingSignals.push(offer);
+            syncTick(); // Force immediate send
         } catch (e) { console.error("Offer creation error:", e); }
     }
 
@@ -171,7 +182,8 @@ function initPeerConnection() {
 
     peerConnection.onicecandidate = (event) => {
         if (event.candidate && partnerUid) {
-            apiCall('send_signal', { partner_uid: partnerUid, signal: { candidate: event.candidate } });
+            // Add to queue instead of individual API calls
+            outgoingSignals.push({ candidate: event.candidate });
         }
     };
 
@@ -200,7 +212,8 @@ async function handleSignal(signal) {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
-            await apiCall('send_signal', { partner_uid: partnerUid, signal: answer });
+            outgoingSignals.push(answer);
+            syncTick(); // Force immediate sync to send the answer back
         } else if (signal.type === 'answer') {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
         } else if (signal.candidate) {
@@ -222,7 +235,10 @@ function closeConnection() {
 
 startBtn.addEventListener('click', async () => {
     console.log("Start Clicked");
-    if (!localStream) await initMedia();
+    if (!localStream) {
+        partnerStatus.textContent = "Accessing camera...";
+        await initMedia();
+    }
     if (!localStream) return;
 
     isFinding = true;
@@ -230,9 +246,19 @@ startBtn.addEventListener('click', async () => {
     partnerStatus.style.display = "block";
     addSystemMessage("Searching for partner...");
 
+    // Immediate interval speed up
+    if (currentInterval !== 150) {
+        currentInterval = 150;
+        clearInterval(syncInterval);
+        syncInterval = setInterval(syncTick, currentInterval);
+    }
+
     const data = await apiCall('find_partner');
     if (data && data.status === 'matched') {
         handleNewPartner(data.partner_uid, true);
+    } else {
+        // Force an immediate sync tick to catch any rapid matches
+        syncTick();
     }
 
     startBtn.disabled = true;
@@ -250,9 +276,18 @@ nextBtn.addEventListener('click', async () => {
     partnerStatus.textContent = "Looking for someone...";
     partnerStatus.style.display = "block";
 
+    // Immediate interval speed up
+    if (currentInterval !== 150) {
+        currentInterval = 150;
+        clearInterval(syncInterval);
+        syncInterval = setInterval(syncTick, currentInterval);
+    }
+
     const data = await apiCall('find_partner');
     if (data && data.status === 'matched') {
         handleNewPartner(data.partner_uid, true);
+    } else {
+        syncTick();
     }
 });
 

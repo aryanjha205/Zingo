@@ -84,9 +84,14 @@ async function syncTick() {
         const data = await apiCall('sync');
         if (!data) return;
 
-        // 3. Keep presence in waiting room if searching
+        // 3. Keep presence in waiting room and check for matches
         if (isFinding && !data.partner_uid) {
-            await apiCall('find_partner');
+            const findResult = await apiCall('find_partner');
+            if (findResult && findResult.status === 'matched') {
+                console.log("Automatic match found in sync loop:", findResult.partner_uid);
+                handleNewPartner(findResult.partner_uid, true);
+                return;
+            }
         }
 
         // Handle match discovery
@@ -393,5 +398,8 @@ confirmReport.addEventListener('click', async () => {
 
 // Start everything
 console.log("Zingo App Initializing...");
-initMedia();
+initMedia().then(() => {
+    // Automatically click start after media is ready for "auto-connect"
+    startBtn.click();
+});
 startSync();

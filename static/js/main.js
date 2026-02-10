@@ -24,6 +24,7 @@ let partnerUid = null;
 let isInitiator = false;
 let isFinding = false;
 let outgoingSignals = []; // Queue for signals to be sent in batch
+let iceQueue = []; // Queue for incoming ICE candidates until remote description is set
 
 const servers = {
     iceServers: [
@@ -68,63 +69,72 @@ async function apiCall(endpoint, data = {}) {
 let syncInterval;
 let currentInterval = 1000;
 
+let isSyncing = false;
+
 async function syncTick() {
-    // 1. Heartbeat
-    const hb = await apiCall('heartbeat');
-    if (hb && hb.online_count !== undefined) {
-        onlineCountSpan.textContent = hb.online_count;
-    }
+    if (isSyncing) return;
+    isSyncing = true;
+    try {
+        const hb = await apiCall('heartbeat');
+        if (hb && hb.online_count !== undefined) {
+            onlineCountSpan.textContent = hb.online_count;
+        }
 
-    // 2. Sync (Signals & Messages)
-    const data = await apiCall('sync');
-    if (!data) return;
+        // 2. Sync (Signals & Messages)
+        const data = await apiCall('sync');
+        if (!data) return;
 
-    // Handle match discovery
-    if (data.partner_uid && !partnerUid) {
-        console.log("Sync found partner:", data.partner_uid);
-        handleNewPartner(data.partner_uid, false);
-    } else if (!data.partner_uid && partnerUid) {
-        console.log("Sync found partner left");
-        handlePartnerLeft();
-    }
+        // Handle match discovery
+        if (data.partner_uid && !partnerUid) {
+            console.log("Sync found partner:", data.partner_uid);
+            handleNewPartner(data.partner_uid, false);
+        } else if (!data.partner_uid && partnerUid) {
+            console.log("Sync found partner left");
+            handlePartnerLeft();
+        }
 
-    // Handle Messages
-    if (data.messages && data.messages.length > 0) {
-        data.messages.forEach(msg => {
-            addChatMessage(msg.message, 'partner');
-        });
-    }
+        // Handle Messages
+        if (data.messages && data.messages.length > 0) {
+            data.messages.forEach(msg => {
+                addChatMessage(msg.message, 'partner');
+            });
+        }
 
-    // Handle Signals
-    if (data.signals && data.signals.length > 0) {
-        data.signals.forEach(async (s) => {
-            await handleSignal(s.signal);
-        });
-    }
+        // Handle Signals
+        if (data.signals && data.signals.length > 0) {
+            data.signals.forEach(async (s) => {
+                await handleSignal(s.signal);
+            });
+        }
 
-    // 3. Send queued signals in parallel
-    if (outgoingSignals.length > 0 && partnerUid) {
-        const signalsToSend = [...outgoingSignals];
-        outgoingSignals = [];
-        signalsToSend.forEach(signal => {
-            apiCall('send_signal', { partner_uid: partnerUid, signal });
-        });
-    }
+        // 3. Send queued signals in parallel
+        if (outgoingSignals.length > 0 && partnerUid) {
+            const signalsToSend = [...outgoingSignals];
+            outgoingSignals = [];
+            signalsToSend.forEach(signal => {
+                apiCall('send_signal', { partner_uid: partnerUid, signal });
+            });
+        }
 
-    // Dynamic Interval Control
-    let nextInterval = 1000;
-    if (partnerUid && peerConnection && (peerConnection.iceConnectionState !== 'connected' && peerConnection.iceConnectionState !== 'completed')) {
-        nextInterval = 150; // Ultra-aggressive 150ms polling during handshake
-    } else if (isFinding) {
-        nextInterval = 300; // Fast when searching
-    } else if (partnerUid) {
-        nextInterval = 600; // Normal chat speed
-    }
+        // Dynamic Interval Control
+        let nextInterval = 1000;
+        if (partnerUid && peerConnection && (peerConnection.iceConnectionState !== 'connected' && peerConnection.iceConnectionState !== 'completed')) {
+            nextInterval = 150; // Ultra-aggressive 150ms polling during handshake
+        } else if (isFinding) {
+            nextInterval = 300; // Fast when searching
+        } else if (partnerUid) {
+            nextInterval = 600; // Normal chat speed
+        }
 
-    if (nextInterval !== currentInterval) {
-        currentInterval = nextInterval;
-        clearInterval(syncInterval);
-        syncInterval = setInterval(syncTick, currentInterval);
+        if (nextInterval !== currentInterval) {
+            currentInterval = nextInterval;
+            clearInterval(syncInterval);
+            syncInterval = setInterval(syncTick, currentInterval);
+        }
+    } catch (err) {
+        console.error("syncTick Error:", err);
+    } finally {
+        isSyncing = false;
     }
 }
 
@@ -136,6 +146,7 @@ async function startSync() {
 // --- WebRTC & Matching Logic ---
 
 async function handleNewPartner(pUid, initiator) {
+    if (partnerUid === pUid) return; // Already matched with this partner
     console.log("Handling new partner:", pUid, "Initiator:", initiator);
     partnerUid = pUid;
     isInitiator = initiator;
@@ -189,7 +200,9 @@ function initPeerConnection() {
 
     peerConnection.ontrack = (event) => {
         console.log("Received remote track");
-        remoteVideo.srcObject = event.streams[0];
+        if (remoteVideo.srcObject !== event.streams[0]) {
+            remoteVideo.srcObject = event.streams[0];
+        }
     };
 
     peerConnection.oniceconnectionstatechange = () => {
@@ -210,25 +223,48 @@ async function handleSignal(signal) {
     try {
         if (signal.type === 'offer') {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
+
+            // Process queued candidates
+            while (iceQueue.length > 0) {
+                const candidate = iceQueue.shift();
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
             outgoingSignals.push(answer);
-            syncTick(); // Force immediate sync to send the answer back
+            syncTick();
         } else if (signal.type === 'answer') {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
+            if (peerConnection.signalingState === "have-local-offer") {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
+
+                // Process queued candidates
+                while (iceQueue.length > 0) {
+                    const candidate = iceQueue.shift();
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                }
+            }
         } else if (signal.candidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+            if (peerConnection.remoteDescription) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+            } else {
+                iceQueue.push(signal.candidate);
+            }
         }
     } catch (e) { console.error("Signal Handling Error:", e); }
 }
 
 function closeConnection() {
     if (peerConnection) {
+        peerConnection.onicecandidate = null;
+        peerConnection.ontrack = null;
+        peerConnection.oniceconnectionstatechange = null;
         peerConnection.close();
         peerConnection = null;
     }
     remoteVideo.srcObject = null;
     partnerUid = null;
+    iceQueue = [];
 }
 
 // --- UI Event Listeners ---

@@ -84,6 +84,11 @@ async function syncTick() {
         const data = await apiCall('sync');
         if (!data) return;
 
+        // 3. Keep presence in waiting room if searching
+        if (isFinding && !data.partner_uid) {
+            await apiCall('find_partner');
+        }
+
         // Handle match discovery
         if (data.partner_uid && !partnerUid) {
             console.log("Sync found partner:", data.partner_uid);
@@ -289,7 +294,7 @@ startBtn.addEventListener('click', async () => {
         syncInterval = setInterval(syncTick, currentInterval);
     }
 
-    const data = await apiCall('find_partner');
+    const data = await apiCall('find_partner', { next: true });
     if (data && data.status === 'matched') {
         handleNewPartner(data.partner_uid, true);
     } else {
@@ -319,7 +324,7 @@ nextBtn.addEventListener('click', async () => {
         syncInterval = setInterval(syncTick, currentInterval);
     }
 
-    const data = await apiCall('find_partner');
+    const data = await apiCall('find_partner', { next: true });
     if (data && data.status === 'matched') {
         handleNewPartner(data.partner_uid, true);
     } else {

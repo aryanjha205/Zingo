@@ -53,19 +53,25 @@ def find_partner():
     data = request.json or {}
     uid = data.get('uid')
     is_stop = data.get('stop', False)
+    is_next = data.get('next', False)
     
     if db is None or not uid: return jsonify({'status': 'error'})
 
-    # If stop, remove from everything
-    if is_stop:
+    # If stop or next, remove existing matches to allow a fresh start
+    if is_stop or is_next:
         matches_col.delete_many({'$or': [{'uid1': uid}, {'uid2': uid}]})
+        
+    if is_stop:
         waiting_col.delete_one({'uid': uid})
         return jsonify({'status': 'stopped'})
 
-    # 1. Clean up stale waiting entries
-    waiting_col.delete_many({'timestamp': {'$lt': time.time() - 30}})
+    # 1. Clean up stale entries globally
+    now = time.time()
+    waiting_col.delete_many({'timestamp': {'$lt': now - 30}})
+    matches_col.delete_many({'last_activity': {'$lt': now - 60}})
 
-    # 2. Check if already matched
+    # 2. Check if ALREADY matched before trying to find a new one
+    # This prevents the "syncTick" from deleting a match that was just made
     existing_match = matches_col.find_one({'$or': [{'uid1': uid}, {'uid2': uid}]})
     if existing_match:
         p_uid = existing_match['uid2'] if existing_match['uid1'] == uid else existing_match['uid1']
@@ -75,16 +81,18 @@ def find_partner():
     partner = waiting_col.find_one_and_delete({'uid': {'$ne': uid}})
     if partner:
         p_uid = partner['uid']
-        # Double check if partner is still online (in last 30s)
-        p_session = sessions_col.find_one({'uid': p_uid, 'last_seen': {'$gt': time.time() - 30}})
-        if p_session:
-            matches_col.insert_one({'uid1': uid, 'uid2': p_uid, 'created_at': time.time()})
-            return jsonify({'status': 'matched', 'partner_uid': p_uid, 'is_initiator': True})
+        matches_col.insert_one({
+            'uid1': uid, 
+            'uid2': p_uid, 
+            'created_at': now,
+            'last_activity': now
+        })
+        return jsonify({'status': 'matched', 'partner_uid': p_uid, 'is_initiator': True})
     
     # 4. If no partner, join waiting room
     waiting_col.update_one(
         {'uid': uid},
-        {'$set': {'timestamp': time.time()}},
+        {'$set': {'timestamp': now}},
         upsert=True
     )
     return jsonify({'status': 'waiting'})

@@ -3,186 +3,111 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zingo • Social Discovery</title>
-    <!-- Favicon -->
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
-    <!-- Premium Icons & Fonts -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zingo - Connect Instantly</title>
+    <meta name="description"
+        content="Zingo is a modern, premium random video chat platform. Connect with people worldwide in real-time.">
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' https: data: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss: http: ws:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com;">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 
 <body>
-    <div class="visual-engine">
-        <div class="aurora"></div>
-        <canvas id="particle-canvas"></canvas>
-    </div>
-
-    <nav class="top-navbar">
-        <div class="logo-wrap">
-            <img src="{{ url_for('static', filename='logo.png') }}" alt="Zingo Logo" class="nav-logo">
-            <span class="brand-name">ZINGO</span>
-        </div>
-        <div class="nav-center">
-            <!-- Navigation links removed as requested -->
-        </div>
-        <div class="nav-controls">
-            <span id="local-identity" class="user-identity">ZINGO USER</span>
-            <div id="status-pill" class="status-pill" style="display: none;">
-                <span class="indicator-dot"></span>
-                <span id="online-count">0</span>+ PEOPLE ONLINE
+    <div class="app-container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="logo">
+                <span class="logo-icon"><i class="fas fa-bolt"></i></span>
+                <h1>Zingo</h1>
             </div>
-        </div>
-    </nav>
-
-    <div id="landing-page" class="overlay-screen active">
-        <div class="hero-card">
-            <div class="hero-logo-container">
-                <img src="{{ url_for('static', filename='logo1.png') }}" alt="Zingo Hero Logo" class="hero-logo">
+            <div class="online-indicator">
+                <span class="status-dot"></span>
+                <span id="online-count">1</span> users online
             </div>
-            <h1 class="hero-title">Zingo.</h1>
-            <p class="hero-desc">Global connection, redefined.</p>
-            <button id="start-btn" class="btn-start">Set Sail</button>
-        </div>
-    </div>
+        </header>
 
-    <!-- Main Workspace -->
-    <div id="app-container" class="app-frame" style="display: none;">
-
-        <!-- Preferences Column -->
-        <aside class="panel side-panel left">
-            <div class="panel-header">
-                <label>Matching Logic</label>
-            </div>
-            <div class="control-group">
-                <button class="pref-btn active">
-                    <i class="fa-solid fa-earth-americas"></i>
-                    <span>Global Network</span>
-                </button>
-                <button class="pref-btn">
-                    <i class="fa-solid fa-location-dot"></i>
-                    <span>Local Nodes</span>
-                </button>
-            </div>
-
-            <div class="panel-header" style="margin-top: 40px;">
-                <label>Interests</label>
-            </div>
-            <div class="tag-cloud">
-                <span class="tag">#gaming</span>
-                <span class="tag">#music</span>
-                <span class="tag">#coding</span>
-                <span class="tag">#art</span>
-                <span class="tag">#travel</span>
-            </div>
-
-            <div style="margin-top: auto;">
-                <button id="report-btn" class="pref-btn"
-                    style="color: var(--accent); border-color: rgba(244, 63, 94, 0.2); width: 100%;">
-                    <i class="fa-solid fa-flag"></i>
-                    <span>Flag Submission</span>
-                </button>
-            </div>
-        </aside>
-
-        <!-- Video Center Stage -->
-        <main class="main-stage">
-            <div class="video-slot partner-feed">
-                <video id="remote-video" autoplay playsinline></video>
-                <div class="video-overlay">
-                    <div class="node-info">
-                        <span class="country-flag">🌍</span>
-                        <span class="user-name identity-badge">AWAY_USER</span>
-                        <div class="quality-indicator"><i class="fa-solid fa-signal"></i></div>
+        <!-- Main Content (Video Area) -->
+        <main class="chat-main">
+            <div class="video-grid">
+                <div class="video-wrapper remote-video-container">
+                    <video id="remote-video" autoplay playsinline
+                        poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%23ccc' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E"></video>
+                    <div class="video-overlay" id="partner-status">Waiting for someone...</div>
+                    <div class="partner-meta">
+                        <span id="partner-info">Stranger</span>
+                        <button id="report-btn" title="Report User"><i class="fas fa-flag"></i></button>
                     </div>
                 </div>
-
-                <div id="searching-overlay" class="searching-state"
-                    style="display: none; position: absolute; inset: 0; background: rgba(248, 250, 252, 0.9); z-index: 50; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(10px);">
-                    <div class="loader-ripple">
-                        <div class="ripple-outer"></div>
-                        <div class="ripple-inner"></div>
-                    </div>
-                    <p class="searching-text">SCANNING FREQUENCIES...</p>
+                <div class="video-wrapper local-video-container">
+                    <video id="local-video" autoplay playsinline muted></video>
+                    <div class="video-tag">You</div>
                 </div>
             </div>
 
-            <!-- PIP Video -->
-            <div class="video-slot local-feed">
-                <video id="local-video" autoplay muted playsinline></video>
-                <div class="video-overlay" style="padding: 12px; justify-content: flex-start;">
-                    <span style="font-size: 10px; font-weight: 700; opacity: 0.6;">LOCAL FEED</span>
+            <!-- Chat Sidebar/Overlay -->
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="system-msg">Press 'Start' to find a random partner</div>
                 </div>
-            </div>
-
-            <!-- Global Control Bar - Moved inside stage -->
-            <div class="action-dock">
-                <button id="toggle-mic" class="dock-btn" title="Mic Toggle"><i
-                        class="fa-solid fa-microphone"></i></button>
-                <button id="next-btn" class="btn-main-next">
-                    <span>SKIP TO NEXT</span>
-                    <i class="fa-solid fa-arrow-right"></i>
-                </button>
-                <button id="toggle-cam" class="dock-btn" title="Camera Toggle"><i
-                        class="fa-solid fa-video"></i></button>
-                <button id="cycle-filters" class="dock-btn"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                    <button id="send-btn"><i class="fas fa-paper-plane"></i></button>
+                </div>
             </div>
         </main>
 
-        <!-- Communication Panel -->
-        <aside class="panel chat-panel side-panel right">
-            <div class="chat-head">
-                <h3>Transmission Log</h3>
-            </div>
-            <div id="chat-messages" class="chat-messages">
-                <div class="system-log">SESSION_LINK_001 ACTIVE</div>
-            </div>
+        <!-- Footer / Controls -->
+        <div class="controls-panel">
+            <button id="start-btn" class="primary-btn">
+                <i class="fas fa-play"></i> <span>Start Chat</span>
+            </button>
+            <button id="next-btn" class="secondary-btn" disabled>
+                <i class="fas fa-forward"></i> <span>Next Partner</span>
+            </button>
+            <button id="stop-btn" class="danger-btn" disabled>
+                <i class="fas fa-stop"></i> <span>Stop</span>
+            </button>
+        </div>
 
-            <div id="typing-indicator"
-                style="display: none; padding: 4px 24px; font-size: 0.75rem; color: var(--text-tertiary); font-style: italic;">
-                User is typing...
-            </div>
-
-            <div class="emoji-bar">
-                <span class="emoji-btn">🔥</span>
-                <span class="emoji-btn">😂</span>
-                <span class="emoji-btn">❤️</span>
-                <span class="emoji-btn">👋</span>
-            </div>
-
-            <div class="chat-input-area">
-                <div class="input-container">
-                    <input type="text" id="chat-input" placeholder="Transmit packet...">
-                    <button id="send-msg" class="btn-send"><i class="fa-solid fa-chevron-up"></i></button>
+        <!-- Footer / Contact Info -->
+        <footer class="app-footer">
+            <div class="footer-content">
+                <div class="footer-info">
+                    <p><i class="fas fa-map-marker-alt"></i> 2nd Floor, Shree Rang Heights Rd, Bhaijipura, Gandhinagar,
+                        Gujarat 382421</p>
+                </div>
+                <div class="footer-copyright">
+                    &copy; 2026 Zingo. All rights reserved.
                 </div>
             </div>
-        </aside>
-
-        </aside>
+        </footer>
     </div>
 
-    <!-- Modals -->
-    <div id="report-modal"
-        style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 5000; align-items: center; justify-content: center; backdrop-filter: blur(12px);">
-        <div class="panel" style="padding: 40px; max-width: 440px; width: 90%;">
-            <h2 style="margin-bottom: 12px;">Report Submission</h2>
-            <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 0.875rem;">Select the primary reason
-                for flagging this node for review.</p>
-
-            <div class="control-group">
-                <button class="pref-btn report-option" value="abusive">Hostile Communication</button>
-                <button class="pref-btn report-option" value="explicit">Inappropriate Visuals</button>
-                <button class="pref-btn report-option" value="spam">Bot / Commercial</button>
+    <!-- Modal for Reporting -->
+    <div id="report-modal" class="modal">
+        <div class="modal-content">
+            <h3>Report User</h3>
+            <p>Why are you reporting this user?</p>
+            <select id="report-reason">
+                <option value="inappropriate">Inappropriate behavior</option>
+                <option value="spam">Spam / Advertising</option>
+                <option value="harassment">Harassment</option>
+                <option value="other">Other</option>
+            </select>
+            <div class="modal-actions">
+                <button id="cancel-report">Cancel</button>
+                <button id="confirm-report" class="confirm-btn">Submit Report</button>
             </div>
-
-            <button id="cancel-report" class="nav-link"
-                style="margin-top: 12px; width: 100%; border: none; cursor: pointer;">Dismiss Action</button>
         </div>
     </div>
 
-    <!-- Application Script -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.js"></script>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 
 </html>

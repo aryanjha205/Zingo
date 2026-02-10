@@ -1,7 +1,6 @@
 flask
-flask-socketio
-pymongo[srv]
-python-dotenv
-eventlet
-flask-cors
+pymongo
+dnspython
 certifi
+gunicorn
+flask-cors

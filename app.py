@@ -1,218 +1,159 @@
-import eventlet
-eventlet.monkey_patch()
 import os
+import time
 import certifi
 from flask import Flask, render_template, request, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
 from pymongo import MongoClient
-from datetime import datetime, timezone
-import uuid
-import threading
-from dotenv import load_dotenv
-
-load_dotenv()
+from bson.objectid import ObjectId
+from flask_cors import CORS
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'zingo_secret_key_2026')
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+app.config['SECRET_KEY'] = 'zingo_secret_key_2026'
+CORS(app)
 
-# MongoDB Connection
+# MongoDB Atlas Setup
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://streetsofahmedabad2_db_user:mAEtqTMGGmEOziVE@cluster0.9u0xk1w.mongodb.net/")
-reports_col = None
-sessions_col = None
-logs_col = None
-db_connected = False
-
-def connect_to_mongodb():
-    global reports_col, sessions_col, logs_col, db_connected
-    print(">>> [INFO] MongoDB: Connecting in background...")
-    try:
-        # Increased timeout slightly for slow networks, but in background so it doesn't block
-        temp_client = MongoClient(
-            MONGO_URI, 
-            tlsCAFile=certifi.where(),
-            connectTimeoutMS=15000,
-            serverSelectionTimeoutMS=15000,
-            socketTimeoutMS=15000
-        )
-        # Force a connection check
-        temp_client.admin.command('ping')
-        
-        target_db = temp_client['zingo_db']
-        reports_col = target_db['reports']
-        sessions_col = target_db['sessions']
-        logs_col = target_db['moderation_logs']
-        db_connected = True
-        print(">>> [SUCCESS] MongoDB: Background connection established")
-    except Exception as e:
-        print(f">>> [WARNING] MongoDB: Background connection failed: {e}")
-        print(">>> [INFO] MongoDB: Features requiring database will be disabled")
-
-# Start connection in background thread
-threading.Thread(target=connect_to_mongodb, daemon=True).start()
-
-# State management
-waiting_users = []  # List of sid
-active_rooms = {}   # sid -> room_id
-room_members = {}   # room_id -> [sid1, sid2]
+try:
+    client = MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=5000)
+    client.admin.command('ping')
+    db = client['zingo_db']
+    reports_col = db['reports']
+    sessions_col = db['sessions']
+    waiting_col = db['waiting_room']
+    matches_col = db['active_matches']
+    messages_col = db['messages']
+    signals_col = db['signals']
+except Exception as e:
+    print(f"MongoDB Connection Error: {e}")
+    db = None
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/api/stats')
-def get_stats():
-    count = 0
-    if sessions_col:
-        count = sessions_col.count_documents({})
-    return jsonify({"online_users": count})
-
-import random
-
-ADJECTIVES = ["Neon", "Silver", "Cyber", "Global", "Arctic", "Solar", "Vortex", "Elite"]
-NOUNS = ["Falcon", "Tiger", "Ghost", "Runner", "Sage", "Knight", "Oracle", "Spark"]
-
-def get_online_count():
-    if sessions_col:
-        return sessions_col.count_documents({})
-    return 0
-
-@socketio.on('connect')
-def handle_connect(auth=None):
-    identity = f"{random.choice(ADJECTIVES)} {random.choice(NOUNS)} {random.randint(10, 99)}"
-    if sessions_col:
-        sessions_col.update_one({'sid': request.sid}, {'$set': {'identity': identity, 'joined_at': datetime.now(timezone.utc)}}, upsert=True)
+@app.route('/api/heartbeat', methods=['POST'])
+def heartbeat():
+    data = request.json or {}
+    uid = data.get('uid')
+    if db is None or not uid: return jsonify({'online_count': 1})
     
-    current_count = get_online_count()
-    emit('identity_assigned', {'identity': identity})
-    emit('update_count', {'count': current_count}, broadcast=True)
-    print(f"User connected: {request.sid} as {identity}. Total: {current_count}")
+    now = time.time()
+    sessions_col.update_one(
+        {'uid': uid},
+        {'$set': {'last_seen': now, 'status': 'online'}},
+        upsert=True
+    )
+    
+    active_threshold = now - 30 # User must have seen in last 30s
+    online_count = sessions_col.count_documents({'last_seen': {'$gt': active_threshold}})
+    
+    return jsonify({'online_count': max(1, online_count)})
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    sid = request.sid
-    
-    # Remove from MongoDB sessions first
-    if sessions_col:
-        sessions_col.delete_one({'sid': sid})
-    
-    # Remove from waiting queue if present
-    if sid in waiting_users:
-        waiting_users.remove(sid)
-    
-    # Notify partner if in a room
-    if sid in active_rooms:
-        room_id = active_rooms.pop(sid)
-        members = room_members.get(room_id, [])
-        if sid in members:
-            members.remove(sid)
-        
-        emit('partner_disconnected', room=room_id, include_self=False)
-        
-        # Cleanup room
-        if not members:
-            room_members.pop(room_id, None)
-        else:
-            # The remaining person is now alone in the room, cleanup their mapping
-            for m_sid in members:
-                active_rooms.pop(m_sid, None)
-                
-    current_count = get_online_count()
-    emit('update_count', {'count': current_count}, broadcast=True)
-    print(f"User disconnected: {sid}. Total: {current_count}")
-
-@socketio.on('find_partner')
+@app.route('/api/find_partner', methods=['POST'])
 def find_partner():
-    sid = request.sid
+    data = request.json or {}
+    uid = data.get('uid')
+    is_stop = data.get('stop', False)
     
-    # If already in a room, leave it
-    if sid in active_rooms:
-        old_room = active_rooms.pop(sid)
-        members = room_members.get(old_room, [])
-        if sid in members: members.remove(sid)
-        emit('partner_disconnected', room=old_room, include_self=False)
-        leave_room(old_room)
+    if db is None or not uid: return jsonify({'status': 'error'})
 
-    if waiting_users and waiting_users[0] != sid:
-        partner_sid = waiting_users.pop(0)
-        room_id = str(uuid.uuid4())
-        
-        active_rooms[sid] = room_id
-        active_rooms[partner_sid] = room_id
-        room_members[room_id] = [sid, partner_sid]
-        
-        # Get identities
-        user1_data = {'identity': 'Anonymous'}
-        user2_data = {'identity': 'Anonymous'}
-        
-        if sessions_col:
-            user1_data = sessions_col.find_one({'sid': sid}) or user1_data
-            user2_data = sessions_col.find_one({'sid': partner_sid}) or user2_data
-        
-        # Notify both users
-        emit('found_partner', {'room_id': room_id, 'initiator': True, 'partner_identity': user2_data['identity']}, room=sid)
-        emit('join_private_room', {'room_id': room_id, 'initiator': False, 'partner_identity': user1_data['identity']}, room=partner_sid)
-        
-        print(f"Matched {sid} with {partner_sid} in room {room_id}")
-    else:
-        if sid not in waiting_users:
-            waiting_users.append(sid)
-        emit('waiting', {'message': 'Searching for a partner...'})
+    # If stop, remove from everything
+    if is_stop:
+        matches_col.delete_many({'$or': [{'uid1': uid}, {'uid2': uid}]})
+        waiting_col.delete_one({'uid': uid})
+        return jsonify({'status': 'stopped'})
 
-@socketio.on('join_room')
-def on_join(data):
-    room = data['room_id']
-    join_room(room)
-    print(f"User {request.sid} joined room {room}")
+    # 1. Clean up stale waiting entries
+    waiting_col.delete_many({'timestamp': {'$lt': time.time() - 30}})
 
-@socketio.on('signal')
-def handle_signal(data):
-    room = active_rooms.get(request.sid)
-    if room:
-        emit('signal', data, room=room, include_self=False)
+    # 2. Check if already matched
+    existing_match = matches_col.find_one({'$or': [{'uid1': uid}, {'uid2': uid}]})
+    if existing_match:
+        p_uid = existing_match['uid2'] if existing_match['uid1'] == uid else existing_match['uid1']
+        return jsonify({'status': 'matched', 'partner_uid': p_uid, 'is_initiator': False})
 
-@socketio.on('chat_message')
-def handle_chat(data):
-    room = active_rooms.get(request.sid)
-    if room:
-        emit('chat_message', {'msg': data['msg'], 'sender': request.sid}, room=room)
-
-@socketio.on('typing')
-def handle_typing(data):
-    # data: {'typing': True/False}
-    room = active_rooms.get(request.sid)
-    if room:
-        emit('partner_typing', {'typing': data['typing'], 'sender': request.sid}, room=room, include_self=False)
-
-@socketio.on('report_user')
-def handle_report(data):
-    sid = request.sid
-    room_id = active_rooms.get(sid)
-    partner_sid = None
+    # 3. Try to find someone waiting (not self)
+    partner = waiting_col.find_one_and_delete({'uid': {'$ne': uid}})
+    if partner:
+        p_uid = partner['uid']
+        # Double check if partner is still online (in last 30s)
+        p_session = sessions_col.find_one({'uid': p_uid, 'last_seen': {'$gt': time.time() - 30}})
+        if p_session:
+            matches_col.insert_one({'uid1': uid, 'uid2': p_uid, 'created_at': time.time()})
+            return jsonify({'status': 'matched', 'partner_uid': p_uid, 'is_initiator': True})
     
-    if room_id:
-        members = room_members.get(room_id, [])
-        for m in members:
-            if m != sid:
-                partner_sid = m
-                break
+    # 4. If no partner, join waiting room
+    waiting_col.update_one(
+        {'uid': uid},
+        {'$set': {'timestamp': time.time()}},
+        upsert=True
+    )
+    return jsonify({'status': 'waiting'})
 
-    report = {
-        'reporter': sid,
-        'reported': partner_sid,
-        'reason': data.get('reason'),
-        'timestamp': datetime.now(timezone.utc)
-    }
-    if reports_col:
-        reports_col.insert_one(report)
-    emit('report_received', {'status': 'success'})
+@app.route('/api/sync', methods=['POST'])
+def sync():
+    data = request.json or {}
+    uid = data.get('uid')
+    if db is None or not uid: return jsonify({'status': 'error'})
+    
+    # Check match status
+    match = matches_col.find_one({'$or': [{'uid1': uid}, {'uid2': uid}]})
+    partner_uid = None
+    if match:
+        partner_uid = match['uid2'] if match['uid1'] == uid else match['uid1']
+        # Update match activity
+        matches_col.update_one({'_id': match['_id']}, {'$set': {'last_activity': time.time()}})
+    
+    # Get incoming messages
+    incoming_messages = list(messages_col.find({'to_uid': uid}))
+    messages_col.delete_many({'to_uid': uid})
+    
+    # Get incoming signals
+    incoming_signals = list(signals_col.find({'to_uid': uid}))
+    signals_col.delete_many({'to_uid': uid})
+    
+    for m in incoming_messages: del m['_id']
+    for s in incoming_signals: del s['_id']
+    
+    return jsonify({
+        'partner_uid': partner_uid,
+        'messages': incoming_messages,
+        'signals': incoming_signals
+    })
 
-@socketio.on('update_interests')
-def handle_interests(data):
-    # This can be used later for targeted matching logic
-    print(f"User {request.sid} updated interests: {data.get('interests')}")
+@app.route('/api/send_message', methods=['POST'])
+def send_message():
+    data = request.json or {}
+    uid = data.get('uid')
+    partner_uid = data.get('partner_uid')
+    text = data.get('message', '')[:1000]
+    
+    if db is None or not uid or not partner_uid: return jsonify({'status': 'error'})
+    
+    messages_col.insert_one({'from_uid': uid, 'to_uid': partner_uid, 'message': text, 'timestamp': time.time()})
+    return jsonify({'status': 'sent'})
+
+@app.route('/api/send_signal', methods=['POST'])
+def send_signal():
+    data = request.json or {}
+    uid = data.get('uid')
+    partner_uid = data.get('partner_uid')
+    signal = data.get('signal')
+    
+    if db is None or not uid or not partner_uid: return jsonify({'status': 'error'})
+    
+    signals_col.insert_one({'from_uid': uid, 'to_uid': partner_uid, 'signal': signal, 'timestamp': time.time()})
+    return jsonify({'status': 'sent'})
+
+@app.route('/api/report', methods=['POST'])
+def report():
+    data = request.json or {}
+    uid = data.get('uid')
+    partner_uid = data.get('partner_uid')
+    reason = data.get('reason')
+    
+    if db is None: return jsonify({'status': 'error'})
+    reports_col.insert_one({'reporter': uid, 'reported': partner_uid, 'reason': reason, 'timestamp': time.time()})
+    return jsonify({'status': 'reported'})
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5011))
-    print(f">>> [INFO] Server: Starting on http://127.0.0.1:{port}")
-    socketio.run(app, debug=True, port=port, host='0.0.0.0', use_reloader=False)
+    app.run(debug=True)

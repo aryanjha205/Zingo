@@ -129,11 +129,11 @@ async function syncTick() {
         // Dynamic Interval Control
         let nextInterval = 1000;
         if (partnerUid && peerConnection && (peerConnection.iceConnectionState !== 'connected' && peerConnection.iceConnectionState !== 'completed')) {
-            nextInterval = 150; // Ultra-aggressive 150ms polling during handshake
+            nextInterval = 100; // Ultra-fast 100ms polling during handshake
         } else if (isFinding) {
-            nextInterval = 300; // Fast when searching
+            nextInterval = 200; // Fast 200ms when searching
         } else if (partnerUid) {
-            nextInterval = 600; // Normal chat speed
+            nextInterval = 500; // Balanced 500ms chat speed
         }
 
         if (nextInterval !== currentInterval) {
@@ -293,8 +293,8 @@ startBtn.addEventListener('click', async () => {
     addSystemMessage("Searching for partner...");
 
     // Immediate interval speed up
-    if (currentInterval !== 150) {
-        currentInterval = 150;
+    if (currentInterval !== 100) {
+        currentInterval = 100;
         clearInterval(syncInterval);
         syncInterval = setInterval(syncTick, currentInterval);
     }
@@ -323,8 +323,8 @@ nextBtn.addEventListener('click', async () => {
     partnerStatus.style.display = "block";
 
     // Immediate interval speed up
-    if (currentInterval !== 150) {
-        currentInterval = 150;
+    if (currentInterval !== 100) {
+        currentInterval = 100;
         clearInterval(syncInterval);
         syncInterval = setInterval(syncTick, currentInterval);
     }
